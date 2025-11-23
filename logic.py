@@ -2,13 +2,7 @@ import pandas as pd
 import numpy as np
 
 def generar_distribucion_horaria(df_registros, E):
-    """
-    df_registros: DataFrame con columnas:
-        - fecha_llegada
-        - hora_llegada
-    E: cantidad esperada para ese día
-    """
-
+   
     df = df_registros.copy()
     df["hora"] = pd.to_datetime(df["hora_llegada"], format="%H:%M").dt.hour
 
@@ -30,3 +24,17 @@ def generar_distribucion_horaria(df_registros, E):
     })
 
     return salida
+
+def pesos_horarios_pred():
+    horas = pd.DataFrame({"hora": range(24)})
+
+    def peso(h):
+        if 0 <= h <= 5: return 0.5
+        if 6 <= h <= 11: return 1.5
+        if 12 <= h <= 18: return 2.5
+        return 1.0
+
+    horas["peso"] = horas["hora"].apply(peso)
+    horas["p_hora"] = horas["peso"] / horas["peso"].sum()
+
+    return horas
