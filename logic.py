@@ -1,40 +1,42 @@
+# daily_logic.py
 import pandas as pd
-import numpy as np
+from datetime import datetime, date
+import calendar
 
-def generar_distribucion_horaria(df_registros, E):
-   
-    df = df_registros.copy()
-    df["hora"] = pd.to_datetime(df["hora_llegada"], format="%H:%M").dt.hour
+def pesos_diarios(year: int, month: int, feriados: list[date] = None):
+    if feriados is None:
+        feriados = []
 
-    conteos = df.groupby("hora").size().reindex(range(24), fill_value=0)
+    dias_mes = calendar.monthrange(year, month)[1]
+    dias = pd.date_range(f"{year}-{month:02d}-01", periods=dias_mes)
 
-    suavizado = 0.1
-    conteos_suav = conteos + suavizado
+    df = pd.DataFrame({"FECHA": dias})
+    df["DIA_MES"] = df["FECHA"].dt.day
+    df["DIA_SEM"] = df["FECHA"].dt.dayofweek
+    df["ES_FINDE"] = df["DIA_SEM"].isin([5, 6])
+    df["ES_FERIADO"] = df["FECHA"].dt.date.isin(feriados)
 
-    total = conteos_suav.sum()
-    p_hora = conteos_suav / total
+    df["PESO"] = 1.0
+    df.loc[df["ES_FINDE"], "PESO"] += 1.0
+    df.loc[df["ES_FERIADO"], "PESO"] += 1.0
+    df.loc[df["DIA_MES"] <= 5, "PESO"] += 0.5
+    df.loc[df["DIA_MES"] >= 25, "PESO"] += 0.3
 
-    pred = E * p_hora
+    total = df["PESO"].sum()
+    df["p_dia"] = df["PESO"] / total
 
-    salida = pd.DataFrame({
-        "hora": range(24),
-        "conteo_real": conteos.values,
-        "p_hora": p_hora.values,
-        "pred_hora": pred.values
-    })
+    return df
 
-    return salida
 
-def pesos_horarios_pred():
-    horas = pd.DataFrame({"hora": range(24)})
+def calcular_E_dia(E_mes: float, fecha_str: str, feriados: list[date] = None):
+    f = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+    df = pesos_diarios(f.year, f.month, feriados)
 
-    def peso(h):
-        if 0 <= h <= 5: return 0.5
-        if 6 <= h <= 11: return 1.5
-        if 12 <= h <= 18: return 2.5
-        return 1.0
+    row = df[df["FECHA"].dt.date == f]
+    if len(row) == 0:
+        raise ValueError(f"Fecha {fecha_str} fuera del mes válido.")
 
-    horas["peso"] = horas["hora"].apply(peso)
-    horas["p_hora"] = horas["peso"] / horas["peso"].sum()
+    p = float(row["p_dia"].iloc[0])
+    E_dia = E_mes * p
 
-    return horas
+    return E_dia, df
