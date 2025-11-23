@@ -19,15 +19,14 @@ class PredictorMensual:
         self.X_cols = None
 
     def cargar_datos(self):
-        viajes = pd.read_csv(DATA_DIR/"viajes.csv")     # 2023 + 2024
-        clima  = pd.read_csv(DATA_DIR/"clima.csv")      # estacionario
-        econ   = pd.read_csv(DATA_DIR/"economia.csv")   # append-only
+        viajes = pd.read_csv(DATA_DIR/"viajes.csv")
+        clima  = pd.read_csv(DATA_DIR/"clima.csv")
+        econ   = pd.read_csv(DATA_DIR/"economia.csv")
 
         viajes["MES"] = pd.Categorical(viajes["MES"], categories=MESES, ordered=True)
         clima["MES"]  = pd.Categorical(clima["MES"],  categories=MESES, ordered=True)
         econ["MES"]   = pd.Categorical(econ["MES"],   categories=MESES, ordered=True)
 
-        # usar siempre el último TCR disponible por mes
         econ_last = econ.sort_values("ANIO").groupby("MES").tail(1)
 
         df = (viajes
@@ -43,7 +42,7 @@ class PredictorMensual:
         X = df[["MES","ANIO","TEMP_PROM","NIEVE_TOT","TCR"]]
         X = pd.get_dummies(X, columns=["MES"], drop_first=True)
         y = df["TOTAL_ENTRADAS"]
-        
+
         X = sm.add_constant(X)
         model = sm.GLM(y, X, family=sm.families.NegativeBinomial()).fit()
 
@@ -85,30 +84,3 @@ class PredictorMensual:
 
         pred = float(self.model.predict(data)[0])
         return max(pred, 0)
-
-    def predict_day_total(self, fecha_str:str):
-        f = datetime.strptime(fecha_str, "%Y-%m-%d").date()
-        mes_nombre = MESES[f.month - 1]
-
-        # mensual → E_mes
-        E_mes = self.predict_month_total(mes_nombre, f.year)
-
-        # pesos diarios
-        import calendar
-        dias_mes = calendar.monthrange(f.year, f.month)[1]
-        dias = pd.date_range(f"{f.year}-{f.month:02d}-01", periods=dias_mes)
-
-        df = pd.DataFrame({"FECHA": dias})
-        df["DIA_MES"] = df["FECHA"].dt.day
-        df["DIA_SEM"] = df["FECHA"].dt.dayofweek
-        df["ES_FINDE"] = df["DIA_SEM"].isin([5,6])
-        df["PESO"] = 1.0
-        df.loc[df["ES_FINDE"], "PESO"] += 1
-        df.loc[df["DIA_MES"] <= 5, "PESO"] += 0.5
-        df.loc[df["DIA_MES"] >= 25, "PESO"] += 0.3
-
-        df["p_dia"] = df["PESO"] / df["PESO"].sum()
-
-        p = df[df["FECHA"].dt.date == f].iloc[0]["p_dia"]
-        E_dia = E_mes * p
-        return E_mes, E_dia
