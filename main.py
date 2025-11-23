@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 from datetime import datetime, date
 
-# ---- Modelos propios ----
 from models import Registro, DistribucionRequest
 from logic import generar_distribucion_horaria, pesos_horarios_pred
 from model_monthly import PredictorMensual, MESES
@@ -14,30 +13,26 @@ app = FastAPI()
 # Instancia del modelo NB
 pred = PredictorMensual()
 
-# Permitir frontend
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Memoria temporal para los viajeros registrados
+# Memoria temporal (registros de viajeros)
 registros_globales = []
 
-
-# -------------------------------------------------------------------
-# HOME
-# -------------------------------------------------------------------
 @app.get("/")
 def home():
-    return {"mensaje": "Backend FastAPI funcional compa 🔥"}
+    return {"mensaje": "Backend FastAPI funcionando 🔥"}
 
 
-# -------------------------------------------------------------------
+# -------------------------------------------
 # REGISTRAR VIAJE
-# -------------------------------------------------------------------
+# -------------------------------------------
 @app.post("/registrar")
 def registrar(data: Registro):
     registros_globales.append(data.dict())
@@ -48,9 +43,9 @@ def registrar(data: Registro):
     }
 
 
-# -------------------------------------------------------------------
-# VER REGISTROS GUARDADOS
-# -------------------------------------------------------------------
+# -------------------------------------------
+# VER REGISTROS
+# -------------------------------------------
 @app.get("/registros")
 def ver_registros():
     return {
@@ -59,14 +54,14 @@ def ver_registros():
     }
 
 
-# -------------------------------------------------------------------
-# DISTRIBUCIÓN HORARIA BASADA EN REGISTROS REALES
-# -------------------------------------------------------------------
+# -------------------------------------------
+# DISTRIBUCIÓN HORARIA BASADA EN REGISTROS
+# -------------------------------------------
 @app.post("/distribucion")
 def distribucion(req: DistribucionRequest):
 
     if len(registros_globales) == 0:
-        return {"error": "No hay registros en memoria todavía"}
+        return {"error": "No hay registros aún"}
 
     df = pd.DataFrame(registros_globales)
     resultado = generar_distribucion_horaria(df, req.esperado)
@@ -74,22 +69,22 @@ def distribucion(req: DistribucionRequest):
     return resultado.to_dict(orient="records")
 
 
-# -------------------------------------------------------------------
-# NUEVO: PREDICCIÓN AUTOMÁTICA POR HORA (MODELO MENSUAL + DIARIO + HORARIO)
-# -------------------------------------------------------------------
+# -------------------------------------------
+# PREDICCIÓN AUTOMÁTICA — (MES → DÍA → HORA)
+# -------------------------------------------
 FERIADOS = [
     date(2025,1,1),
     date(2025,4,18),
     date(2025,5,1)
 ]
 
-@app.get("/prediccion_horaria")
+@app.get("/prediccion_horaria/")
 def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
 
     try:
         f = datetime.strptime(fecha, "%Y-%m-%d").date()
     except:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD"}
+        return {"error": "Formato inválido. Usa YYYY-MM-DD"}
 
     mes_nombre = MESES[f.month - 1]
 
@@ -97,9 +92,9 @@ def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
     E_mes = pred.predict_month_total(mes_nombre, f.year)
 
     # 2) Predicción diaria E_dia
-    E_dia, _tabla = calcular_E_dia(E_mes, fecha, FERIADOS)
+    E_dia, _ = calcular_E_dia(E_mes, fecha, FERIADOS)
 
-    # 3) Distribución horaria automática
+    # 3) Distribución horaria
     horas = pesos_horarios_pred()
     horas["pred_hora"] = E_dia * horas["p_hora"]
 
@@ -113,9 +108,9 @@ def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
     }
 
 
-# -------------------------------------------------------------------
-# ENDPOINT PARA GUARDAR ECONOMÍA (APPEND-ONLY)
-# -------------------------------------------------------------------
+# -------------------------------------------
+# GUARDAR ECONOMÍA (append-only)
+# -------------------------------------------
 from pydantic import BaseModel
 
 class EconomiaIn(BaseModel):
@@ -126,7 +121,6 @@ class EconomiaIn(BaseModel):
     ipc_cl: float
     ipc_ar: float
 
-
 @app.post("/economia")
 def guardar_economia(data: EconomiaIn):
     import os
@@ -134,13 +128,11 @@ def guardar_economia(data: EconomiaIn):
     path = "data/economia.csv"
     os.makedirs("data", exist_ok=True)
 
-    # Cargar si existe o crear
     if os.path.exists(path):
         df = pd.read_csv(path)
     else:
         df = pd.DataFrame(columns=["ANIO","MES","CLP_USD","ARS_USD","IPC_CL","IPC_AR","TCR"])
 
-    # Calcular TCR
     tcn = data.clp_usd / data.ars_usd
     tcr = tcn * (data.ipc_ar / data.ipc_cl)
 
@@ -157,7 +149,7 @@ def guardar_economia(data: EconomiaIn):
     df = pd.concat([df, nueva], ignore_index=True)
     df.to_csv(path, index=False)
 
-    return {"ok": True, "tcr": tcr, "total_registros": len(df)}
+    return {"ok": True, "tcr": tcr}
 
 
 @app.get("/economia")
