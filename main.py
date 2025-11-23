@@ -33,6 +33,16 @@ def registrar(data: Registro):
     return {"status": "ok", "mensaje": "Registro guardado", "total_registros": len(registros_globales)}
 
 # ----------------------------
+# VER REGISTROS GUARDADOS
+# ----------------------------
+@app.get("/registros")
+def ver_registros():
+    return {
+        "total_registros": len(registros_globales),
+        "registros": registros_globales
+    }
+
+# ----------------------------
 # DISTRIBUCIÓN HORARIA
 # ----------------------------
 @app.post("/distribucion")
