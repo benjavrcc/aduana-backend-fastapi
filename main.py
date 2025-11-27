@@ -31,11 +31,26 @@ def home():
 # -------------------------------------------
 @app.post("/registrar")
 def registrar(data: Registro):
-    registros_globales.append(data.dict())
+
+    import os
+    import pandas as pd
+
+    os.makedirs("data", exist_ok=True)
+    path = "data/registros.csv"
+
+    # Si existe, agregar
+    if os.path.exists(path):
+        df = pd.read_csv(path)
+        df = pd.concat([df, pd.DataFrame([data.dict()])], ignore_index=True)
+    else:
+        df = pd.DataFrame([data.dict()])
+
+    df.to_csv(path, index=False)
+
     return {
         "status": "ok",
         "mensaje": "Registro guardado",
-        "total_registros": len(registros_globales)
+        "total_registros": len(df)
     }
 
 
@@ -44,9 +59,20 @@ def registrar(data: Registro):
 # -------------------------------------------
 @app.get("/registros")
 def ver_registros():
+
+    import os
+    import pandas as pd
+
+    path = "data/registros.csv"
+
+    if not os.path.exists(path):
+        return {"total_registros": 0, "registros": []}
+
+    df = pd.read_csv(path)
+
     return {
-        "total_registros": len(registros_globales),
-        "registros": registros_globales
+        "total_registros": len(df),
+        "registros": df.to_dict(orient="records")
     }
 
 
