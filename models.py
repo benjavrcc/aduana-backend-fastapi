@@ -6,5 +6,4 @@ class Registro(BaseModel):
     cantidad_viajeros: int
 
 class DistribucionRequest(BaseModel):
-    registros: list[Registro]
     esperado: float
