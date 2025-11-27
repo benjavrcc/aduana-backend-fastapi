@@ -7,6 +7,11 @@ from models import Registro, DistribucionRequest
 from logic import generar_distribucion_horaria, pesos_horarios_pred
 from daily_logic import calcular_E_dia
 
+MESES_ES = [
+    "enero","febrero","marzo","abril","mayo","junio",
+    "julio","agosto","septiembre","octubre","noviembre","diciembre"
+]
+
 app = FastAPI()
 
 # CORS
@@ -94,32 +99,21 @@ def distribucion(req: DistribucionRequest):
 # -------------------------------------------
 # 4) PREDICCIÓN AUTOMÁTICA (USANDO CSV DEL 2025)
 # -------------------------------------------
-@app.get("/prediccion_horaria")
+@app.get("/prediccion_horaria/")
 def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
 
-    # validar fecha
     try:
         f = datetime.strptime(fecha, "%Y-%m-%d").date()
     except:
         return {"error": "Formato inválido. Usa YYYY-MM-DD"}
 
-    mes_nombre = f.strftime("%B").lower()  # abril, marzo, etc.
+    mes_nombre = MESES_ES[f.month - 1]   # ← ESTA ES LA LÍNEA ARREGLADA
 
-    # Cargar predicciones mensuales generadas en R
-    pred_2025 = pd.read_csv("data/predicciones_2025.csv")
+    # 1) Predicción mensual E_mes
+    E_mes = pred.predict_month_total(mes_nombre, f.year)
 
-    fila = pred_2025[
-        (pred_2025["ANIO"] == f.year) &
-        (pred_2025["MES"] == mes_nombre)
-    ]
-
-    if len(fila) == 0:
-        return {"error": f"No hay predicción mensual para {mes_nombre} {f.year}"}
-
-    E_mes = float(fila["PREDICCION"].iloc[0])
-
-    # 2) Predicción diaria
-    E_dia, _ = calcular_E_dia(E_mes, fecha)
+    # 2) Predicción diaria E_dia
+    E_dia, _ = calcular_E_dia(E_mes, fecha, FERIADOS)
 
     # 3) Distribución horaria
     horas = pesos_horarios_pred()
@@ -129,7 +123,7 @@ def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
         "fecha": fecha,
         "mes": mes_nombre,
         "anio": f.year,
-        "E_mes": E_mes,
-        "E_dia": E_dia,
+        "E_mes": round(E_mes),
+        "E_dia": round(E_dia),
         "horas": horas.to_dict(orient="records")
     }
