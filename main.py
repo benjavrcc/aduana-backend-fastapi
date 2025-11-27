@@ -1,17 +1,13 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime
 
 from models import Registro, DistribucionRequest
 from logic import generar_distribucion_horaria, pesos_horarios_pred
-from model_monthly import PredictorMensual, MESES
 from daily_logic import calcular_E_dia
 
 app = FastAPI()
-
-# Instancia del modelo NB
-pred = PredictorMensual()
 
 # CORS
 app.add_middleware(
@@ -22,16 +18,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Memoria temporal (registros de viajeros)
+# Memoria temporal solo para registros
 registros_globales = []
 
 @app.get("/")
 def home():
-    return {"mensaje": "Backend FastAPI funcionando 🔥"}
+    return {"mensaje": "Backend Aduana Digital funcionando 🔥"}
 
 
 # -------------------------------------------
-# REGISTRAR VIAJE
+# 1) REGISTRAR VIAJERO
 # -------------------------------------------
 @app.post("/registrar")
 def registrar(data: Registro):
@@ -44,7 +40,7 @@ def registrar(data: Registro):
 
 
 # -------------------------------------------
-# VER REGISTROS
+# 2) VER REGISTROS
 # -------------------------------------------
 @app.get("/registros")
 def ver_registros():
@@ -55,7 +51,7 @@ def ver_registros():
 
 
 # -------------------------------------------
-# DISTRIBUCIÓN HORARIA BASADA EN REGISTROS
+# 3) DISTRIBUCIÓN HORARIA CON REGISTROS REALES
 # -------------------------------------------
 @app.post("/distribucion")
 def distribucion(req: DistribucionRequest):
@@ -70,29 +66,34 @@ def distribucion(req: DistribucionRequest):
 
 
 # -------------------------------------------
-# PREDICCIÓN AUTOMÁTICA — (MES → DÍA → HORA)
+# 4) PREDICCIÓN AUTOMÁTICA (USANDO CSV DEL 2025)
 # -------------------------------------------
-FERIADOS = [
-    date(2025,1,1),
-    date(2025,4,18),
-    date(2025,5,1)
-]
-
-@app.get("/prediccion_horaria/")
+@app.get("/prediccion_horaria")
 def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
 
+    # validar fecha
     try:
         f = datetime.strptime(fecha, "%Y-%m-%d").date()
     except:
         return {"error": "Formato inválido. Usa YYYY-MM-DD"}
 
-    mes_nombre = MESES[f.month - 1]
+    mes_nombre = f.strftime("%B").lower()  # abril, marzo, etc.
 
-    # 1) Predicción mensual E_mes
-    E_mes = pred.predict_month_total(mes_nombre, f.year)
+    # Cargar predicciones mensuales generadas en R
+    pred_2025 = pd.read_csv("data/predicciones_2025.csv")
 
-    # 2) Predicción diaria E_dia
-    E_dia, _ = calcular_E_dia(E_mes, fecha, FERIADOS)
+    fila = pred_2025[
+        (pred_2025["ANIO"] == f.year) &
+        (pred_2025["MES"] == mes_nombre)
+    ]
+
+    if len(fila) == 0:
+        return {"error": f"No hay predicción mensual para {mes_nombre} {f.year}"}
+
+    E_mes = float(fila["PREDICCION"].iloc[0])
+
+    # 2) Predicción diaria
+    E_dia, _ = calcular_E_dia(E_mes, fecha)
 
     # 3) Distribución horaria
     horas = pesos_horarios_pred()
@@ -102,60 +103,7 @@ def prediccion_horaria(fecha: str = Query(..., description="YYYY-MM-DD")):
         "fecha": fecha,
         "mes": mes_nombre,
         "anio": f.year,
-        "E_mes": round(E_mes),
-        "E_dia": round(E_dia),
+        "E_mes": E_mes,
+        "E_dia": E_dia,
         "horas": horas.to_dict(orient="records")
     }
-
-
-# -------------------------------------------
-# GUARDAR ECONOMÍA (append-only)
-# -------------------------------------------
-from pydantic import BaseModel
-
-class EconomiaIn(BaseModel):
-    anio: int
-    mes: str
-    clp_usd: float
-    ars_usd: float
-    ipc_cl: float
-    ipc_ar: float
-
-@app.post("/economia")
-def guardar_economia(data: EconomiaIn):
-    import os
-
-    path = "data/economia.csv"
-    os.makedirs("data", exist_ok=True)
-
-    if os.path.exists(path):
-        df = pd.read_csv(path)
-    else:
-        df = pd.DataFrame(columns=["ANIO","MES","CLP_USD","ARS_USD","IPC_CL","IPC_AR","TCR"])
-
-    tcn = data.clp_usd / data.ars_usd
-    tcr = tcn * (data.ipc_ar / data.ipc_cl)
-
-    nueva = pd.DataFrame([{
-        "ANIO": data.anio,
-        "MES": data.mes.lower(),
-        "CLP_USD": data.clp_usd,
-        "ARS_USD": data.ars_usd,
-        "IPC_CL": data.ipc_cl,
-        "IPC_AR": data.ipc_ar,
-        "TCR": tcr
-    }])
-
-    df = pd.concat([df, nueva], ignore_index=True)
-    df.to_csv(path, index=False)
-
-    return {"ok": True, "tcr": tcr}
-
-
-@app.get("/economia")
-def ver_economia():
-    import os
-    path = "data/economia.csv"
-    if not os.path.exists(path):
-        return []
-    return pd.read_csv(path).to_dict(orient="records")
