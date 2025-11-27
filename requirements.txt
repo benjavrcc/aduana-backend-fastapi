@@ -2,5 +2,4 @@ fastapi
 uvicorn
 pandas
 pydantic
-statsmodels
 numpy
